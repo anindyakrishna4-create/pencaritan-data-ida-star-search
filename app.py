@@ -1,4 +1,4 @@
-# File: app.py (Virtual Lab IDA* Search - VERSI PALING STABIL DAN FINAL)
+# File: app.py (Virtual Lab IDA* Search - VERSI FINAL DAN AMAN)
 
 import streamlit as st
 import pandas as pd
@@ -6,12 +6,13 @@ import time
 import matplotlib.pyplot as plt
 import networkx as nx 
 import random
+from collections import deque # Tidak digunakan, tapi bagus untuk struktur data
 
 # List global untuk menyimpan riwayat langkah
 HISTORY = []
 
 # =================================================================
-# --- FUNGSI ALGORITMA IDA* SEARCH ---
+# --- FUNGSI ALGORITMA IDA* SEARCH (Koreksi Total) ---
 # =================================================================
 
 def search(graph, heuristic, current_node, goal_node, current_g, bound, current_path):
@@ -27,7 +28,7 @@ def search(graph, heuristic, current_node, goal_node, current_g, bound, current_
 
     # Catat status pengecekan simpul
     HISTORY.append({
-        'action': f"DFS Check: Simpul '{current_node}'. f(n)={f_score:.2f}, g(n)={current_g:.2f}, h(n)={h_score:.2f}. Batas saat ini: {bound:.2f}.",
+        'action': f"DFS Check: Simpul '{current_node}'. f(n)={f_score:.2f}, g(n)={current_g:.2f}, h(n)={h_score:.2f}. Batas: {bound:.2f}.",
         'f_score': f_score,
         'expanded': current_node,
         'path': current_path,
@@ -62,10 +63,12 @@ def search(graph, heuristic, current_node, goal_node, current_g, bound, current_
     min_next_bound = float('inf')
     
     if current_node in graph:
+        # Sorting tetangga berdasarkan f(n) yang diprediksi (membantu heuristik DFS)
         neighbors_sorted = sorted(graph[current_node].items(), 
                                   key=lambda item: current_g + item[1] + heuristic.get(item[0], float('inf')))
 
         for neighbor, cost in neighbors_sorted:
+            # Cegah siklus sederhana di DFS
             if neighbor not in current_path:
                 
                 new_g = current_g + cost
@@ -74,22 +77,22 @@ def search(graph, heuristic, current_node, goal_node, current_g, bound, current_
                 # PANGGILAN REKURSIF
                 result_f, result_path, final_cost = search(graph, heuristic, neighbor, goal_node, new_g, bound, new_path)
 
-                # Jika jalur ditemukan, kembalikan segera (Optimal)
+                # Jika jalur ditemukan, kembalikan segera (Optimalitas terjamin)
                 if result_path is not None:
                     return result_f, result_path, final_cost
 
-                # Update batas f(n) terendah yang baru ditemukan
+                # Update batas f(n) terendah yang baru ditemukan (untuk iterasi berikutnya)
                 min_next_bound = min(min_next_bound, result_f)
 
     return min_next_bound, None, 0
 
 
-def ida_star_search(graph, heuristic, start_node, goal_node, all_nodes_list):
+def ida_star_search(graph, heuristic, start_node, goal_node):
     """Fungsi utama yang mengulang (Iterative Deepening) batas f(n)."""
     global HISTORY
     HISTORY = []
 
-    initial_h = heuristic.get(start_node, 0)
+    initial_h = heuristic.get(start_node, 0.0)
     bound = initial_h
     
     HISTORY.append({
@@ -101,7 +104,7 @@ def ida_star_search(graph, heuristic, start_node, goal_node, all_nodes_list):
     })
 
     while True:
-        min_next_bound, final_path, final_cost = search(graph, heuristic, start_node, goal_node, 0, bound, [start_node])
+        min_next_bound, final_path, final_cost = search(graph, heuristic, start_node, goal_node, 0.0, bound, [start_node])
         
         # 1. Jalur Optimal Ditemukan
         if final_path is not None:
@@ -122,8 +125,9 @@ def ida_star_search(graph, heuristic, start_node, goal_node, all_nodes_list):
             'status': 'New Bound'
         })
         
-        if len(HISTORY) > 1500: 
-            st.error("Terlalu banyak iterasi. Menghentikan pencarian.")
+        # Batasan iterasi yang lebih aman
+        if len(HISTORY) > 2000: 
+            st.error("Terlalu banyak langkah. Menghentikan pencarian untuk menghindari loop tak terbatas.")
             return None, 0, HISTORY
 
 # =================================================================
@@ -137,7 +141,7 @@ st.set_page_config(
 
 st.title("🌟 Virtual Lab: IDA* Search Interaktif (Iterative Deepening A*)")
 st.markdown("### Memadukan Optimasi Biaya dan Efisiensi Memori")
-# 
+
 st.sidebar.header("Konfigurasi Graf, Heuristik, dan Pencarian")
 
 # Contoh Graf
@@ -169,7 +173,7 @@ input_heuristic_str = st.sidebar.text_area(
     default_heuristic_str, height=150
 )
 
-# Parsing Graf dan Heuristik (TIDAK ADA PERUBAHAN DI SINI)
+# Parsing Graf dan Heuristik
 try:
     graph_data = {}
     nodes = set()
@@ -186,6 +190,7 @@ try:
                 parts = neighbor_cost.strip().split('=')
                 if len(parts) == 2:
                     neighbor = parts[0].strip()
+                    # Pastikan biaya adalah float untuk perhitungan f-score yang akurat
                     cost = float(parts[1].strip()) 
                     nodes.add(neighbor)
                     graph_data[parent][neighbor] = cost
@@ -214,11 +219,11 @@ try:
     speed = st.sidebar.slider("Kecepatan Simulasi (detik)", 0.0, 1.0, 0.1)
 
 except Exception as e:
-    st.error(f"Kesalahan parsing data: {e}")
+    st.error(f"Kesalahan parsing data: {e}. Pastikan format input benar.")
     st.stop()
 
 
-# --- Fungsi Plot Graf (Perbaikan SyntaxError ada di sini) ---
+# --- Fungsi Plot Graf (NetworkX + Matplotlib) ---
 def plot_graph(graph_edges, all_nodes_list, path_found=None, expanded_node=None, heuristic_dict=None, current_f_bound=None, g_score_dict=None):
     
     G = nx.DiGraph()
@@ -232,14 +237,13 @@ def plot_graph(graph_edges, all_nodes_list, path_found=None, expanded_node=None,
         
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    # Kode Warna Default dan Mapping (TIDAK BERMASALAH)
     node_colors = ['#cccccc'] * len(all_nodes_list)
     node_map = {node: idx for idx, node in enumerate(all_nodes_list)}
     edge_colors = ['#888888'] * len(G.edges())
     
     # 1. Menandai Simpul yang Diekspansi/Dicek (Orange)
     if expanded_node and expanded_node in node_map:
-        node_colors[node_map[expanded_node]] = '#FF9900'  # KODE WARNA LENGKAP
+        node_colors[node_map[expanded_node]] = '#FF9900' 
     
     # 2. Menandai Jalur yang Ditemukan (Hijau)
     if path_found and len(path_found) > 1:
@@ -247,7 +251,7 @@ def plot_graph(graph_edges, all_nodes_list, path_found=None, expanded_node=None,
         
         for node in path_found:
              if node in node_map:
-                 node_colors[node_map[node]] = '#6AA84F' # KODE WARNA LENGKAP (HIJAU)
+                 node_colors[node_map[node]] = '#6AA84F' 
                  
         for i, edge in enumerate(G.edges()):
             if (edge[0], edge[1]) in path_edges:
@@ -255,9 +259,9 @@ def plot_graph(graph_edges, all_nodes_list, path_found=None, expanded_node=None,
 
     # 3. Menandai Start (Biru) dan Goal (Ungu)
     if start_node in node_map:
-        node_colors[node_map[start_node]] = '#4A86E8' # KODE WARNA LENGKAP (BIRU)
+        node_colors[node_map[start_node]] = '#4A86E8' 
     if goal_node in node_map:
-        node_colors[node_map[goal_node]] = '#8E44AD' # KODE WARNA LENGKAP (UNGU)
+        node_colors[node_map[goal_node]] = '#8E44AD' 
         
     # --- Gambar Graf ---
     nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=1500, alpha=0.9, ax=ax)
@@ -271,11 +275,10 @@ def plot_graph(graph_edges, all_nodes_list, path_found=None, expanded_node=None,
     # Label F-Score (Biru)
     score_labels = {}
     for node in G.nodes():
-        # Hanya tampilkan g(n) simpul yang sedang dicek atau sudah ditemukan
         g = g_score_dict.get(node) if g_score_dict and node in g_score_dict else '?'
         h = heuristic_dict.get(node, '?')
         
-        # Perhitungan F-score
+        # Pastikan perhitungan F-score hanya jika g dan h adalah angka
         f = g + h if isinstance(g, (int, float)) and isinstance(h, (int, float)) else '?'
         
         score_labels[node] = f"f:{f}, h:{h}"
@@ -304,7 +307,7 @@ graph_edges_list = [(u, v, d) for u, neighbors in graph_data.items() for v, d in
 
 if st.button("Mulai Simulasi IDA* Search"):
     
-    path, cost, history = ida_star_search(graph_data, heuristic_data, start_node, goal_node, all_nodes)
+    path, cost, history = ida_star_search(graph_data, heuristic_data, start_node, goal_node)
     
     col1, col2 = st.columns([3, 2])
     
@@ -316,9 +319,9 @@ if st.button("Mulai Simulasi IDA* Search"):
     
     final_path_nodes = None
     final_cost = 0
-    current_bound = heuristic_data.get(start_node, 0)
+    current_bound = heuristic_data.get(start_node, 0.0)
     
-    g_score_tracking = {} # Melacak g_score node yang sudah dicek/dievaluasi
+    g_score_tracking = {} 
     
     for step, state in enumerate(history):
         status = state['status']
@@ -329,13 +332,12 @@ if st.button("Mulai Simulasi IDA* Search"):
         
         # Perbarui g_score tracking
         if status == 'Check' or status == 'Ditemukan':
-             # Hanya simpul yang sedang dicek yang memiliki g_score di state ini
-             g_score_tracking[expanded_node] = state.get('g_score', 0)
+             g_score_tracking[expanded_node] = state.get('g_score', 0.0)
         
         if status == 'New Bound':
             current_bound = state.get('f_score')
-            # Reset g_score tracking jika iterasi baru dimulai (opsional, tapi lebih bersih)
-            g_score_tracking = {start_node: 0.0} 
+            # Reset g_score tracking pada awal iterasi baru, hanya simpan simpul awal
+            g_score_tracking = {start_node: 0.0}
         elif status == 'Ditemukan':
              final_path_nodes = current_path
              final_cost = state.get('cost')
@@ -349,7 +351,7 @@ if st.button("Mulai Simulasi IDA* Search"):
             expanded_node=expanded_node,
             heuristic_dict=heuristic_data,
             current_f_bound=current_bound,
-            g_score_dict=g_score_tracking # Kirim seluruh g_score yang dilacak
+            g_score_dict=g_score_tracking 
         )
 
         with vis_placeholder.container():
@@ -362,4 +364,29 @@ if st.button("Mulai Simulasi IDA* Search"):
                  {'Atribut': 'Simpul Diekspansi/Dicek', 'Nilai': expanded_node if expanded_node else '-'},
                  {'Atribut': 'Jalur Saat Ini', 'Nilai': ' -> '.join(current_path) if current_path else '-'},
              ])
-             st.dataframe(df
+             st.dataframe(df_status.set_index('Atribut'), use_container_width=True)
+
+
+        with status_placeholder.container():
+            if status == 'Ditemukan':
+                st.success(f"**Langkah ke-{step+1}** | **Status:** {status}")
+            elif status == 'Gagal':
+                st.error(f"**Langkah ke-{step+1}** | **Status:** {status}")
+            else:
+                 st.info(f"**Langkah ke-{step+1}** | **Status:** {status}")
+            st.caption(action)
+
+        time.sleep(speed)
+
+    # --- Hasil Akhir Final ---
+    st.markdown("---")
+    if final_path_nodes:
+        st.balloons()
+        st.success(f"**Pencarian Tuntas!**")
+        st.write(f"Jalur Optimal DITEMUKAN: **{' -> '.join(final_path_nodes)}**")
+        st.write(f"Total Biaya $g(n)$ Akhir: **{final_cost:.2f}**")
+    else:
+        st.error(f"**Pencarian Tuntas!**")
+        st.write("Simpul Tujuan tidak dapat dijangkau.")
+    
+    st.info(f"Algoritma IDA* Search selesai dalam **{len(history)}** langkah total.")
